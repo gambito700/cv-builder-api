@@ -36,11 +36,6 @@ services:
     # ya resuelve ambos casos: ENV PORT=5000 como default y el CMD hace
     # --bind 0.0.0.0:${PORT:-5000}, de modo que manda Render si define PORT.
 
-    # El apagado por defecto son 30s y una compilacion puede tardar 30s por
-    # pasada: sin esto, Render mataria el worker a mitad de un compile.
-    # El maximo de la spec es 300.
-    maxShutdownDelaySeconds: 90
-
     envVars:
       - key: ALLOWED_ORIGIN
         value: https://gambito700.github.io
