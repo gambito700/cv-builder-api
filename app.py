@@ -281,6 +281,11 @@ def _read_tail(path: str, limit: int = 2000) -> str:
         return ""
 
 
+#: _summarize_log devuelve esto cuando el log no tiene ninguna linea `!`.
+#: Para el cliente es indistinguible de un motivo real, asi que no se le envia.
+_SIN_ERROR = "sin linea de error"
+
+
 def _summarize_log(text: str, limit: int = 240) -> str:
     """Resumen sin rutas absolutas ni eco del input del usuario.
 
@@ -297,10 +302,14 @@ class CompileTimeout(Exception):
     """pdflatex supero el presupuesto de tiempo de la peticion."""
 
 
-def compile_tex(tex_code: str, correlation_id: str) -> tuple[bytes | None, str]:
-    """Compila un .tex. Devuelve (pdf_bytes, "") o (None, motivo_legible).
+def compile_tex(tex_code: str, correlation_id: str) -> tuple[bytes | None, str, str]:
+    """Compila un .tex. Devuelve (pdf_bytes, motivo, error_latex_para_cliente).
 
-    Todo lo que se devuelve aqui va al log del servidor, nunca al cliente.
+    `motivo` va al log del servidor. `error_latex_para_cliente` es el resumen ya
+    SANEADO de las lineas `! ...` del log de LaTeX: sin rutas absolutas, sin
+    versiones de paquetes y con tope de longitud. Quien recibe la respuesta es el
+    autor del propio .tex, asi que decirle por que fallo su documento no le
+    revela nada a un tercero. El log COMPLETO se queda en el servidor.
     """
     workdir = tempfile.mkdtemp(prefix="cvb-")
     try:
@@ -344,30 +353,32 @@ def compile_tex(tex_code: str, correlation_id: str) -> tuple[bytes | None, str]:
         pdf_path = os.path.join(workdir, "cv.pdf")
         if not os.path.exists(pdf_path):
             detail = _read_tail(out_log, 2000)
+            resumen = _summarize_log(detail)
             log.error("id=%s sin PDF | %s", correlation_id,
-                      _summarize_log(detail) or "log vacio")
+                      resumen or "log vacio")
             log.error("id=%s log LaTeX (solo servidor):\n%s", correlation_id, detail)
-            return None, "La compilacion no produjo PDF"
+            return (None, "La compilacion no produjo PDF",
+                    "" if resumen == _SIN_ERROR else resumen)
 
         with open(pdf_path, "rb") as fh:
             pdf = fh.read()
         if not pdf.startswith(b"%PDF"):
             log.error("id=%s cv.pdf sin cabecera %%PDF (%dB)", correlation_id, len(pdf))
-            return None, "La compilacion produjo un fichero invalido"
+            return None, "La compilacion produjo un fichero invalido", ""
         if len(pdf) > MAX_PDF_BYTES:
             log.error("id=%s cv.pdf de %dB supera el tope", correlation_id, len(pdf))
-            return None, "El PDF generado supera el tamano maximo"
-        return pdf, ""
+            return None, "El PDF generado supera el tamano maximo", ""
+        return pdf, "", ""
     except CompileTimeout:
         log.error("id=%s timeout tras %ds de CPU/pared", correlation_id,
                   COMPILE_TIMEOUT_SECONDS * LATEX_PASSES)
-        return None, "timeout"
+        return None, "timeout", ""
     except FileNotFoundError:
         log.error("pdflatex no encontrado en PATH")
-        return None, "pdflatex no disponible"
+        return None, "pdflatex no disponible", ""
     except OSError as exc:
         log.exception("id=%s error de E/S: %s", correlation_id, exc)
-        return None, "error interno"
+        return None, "error interno", ""
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
@@ -388,7 +399,7 @@ def _sandbox_selftest() -> None:
     deja el resultado visible en /health y en el log.
     """
     started = time.monotonic()
-    pdf, reason = compile_tex(_SANDBOX_PROBE, "selftest")
+    pdf, reason, _ = compile_tex(_SANDBOX_PROBE, "selftest")
     ok = pdf is not None
     detail = "ok" if ok else reason
     sandbox_report.update(ok=ok, detail=detail)
@@ -519,7 +530,7 @@ def compile_endpoint():
     with _state_lock:
         _running += 1
     try:
-        pdf, reason = compile_tex(tex_code, correlation_id)
+        pdf, reason, latex_error = compile_tex(tex_code, correlation_id)
     finally:
         with _state_lock:
             _running -= 1
@@ -527,11 +538,17 @@ def compile_endpoint():
 
     if pdf is None:
         status = 504 if reason == "timeout" else 422
-        # El log de LaTeX NO va al cliente: filtraria rutas absolutas, versiones
-        # de paquetes y el eco del input. Va al log del servidor con el id.
         log.warning("id=%s fallo (%s) template=%s en %.1fs", correlation_id,
                     reason, template, time.monotonic() - started)
-        return jsonify({"error": "La compilacion fallo", "id": correlation_id}), status
+        body: dict[str, object] = {"error": "La compilacion fallo",
+                                   "id": correlation_id}
+        if latex_error:
+            # Solo el resumen SANEADO de las lineas `! ...`: rutas ya
+            # sustituidas por <ruta>, sin versiones y con tope de longitud
+            # (_summarize_log). El log completo NO sale del servidor, pero sin
+            # esto el cliente solo sabe que "fallo" y no puede corregir nada.
+            body["latex_error"] = latex_error
+        return jsonify(body), status
 
     log.info("id=%s OK template=%s bytes=%d en %.1fs", correlation_id, template,
              len(pdf), time.monotonic() - started)

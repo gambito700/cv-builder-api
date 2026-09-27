@@ -38,13 +38,17 @@ Respuestas:
 | 400 | `{error, id}` | Falta `tex`, o no parece un documento LaTeX |
 | 401 | `{error, id}` | `X-API-Key` incorrecto |
 | 413 | `{error}` | El cuerpo supera el tope |
-| 422 | `{error, id}` | La compilacion fallo |
+| 422 | `{error, id, latex_error?}` | La compilacion fallo. `latex_error` aparece solo si el log de pdflatex trae alguna linea `! ...` |
 | 429 | `{error}` | Rate limit |
 | 503 | `{error}` | Sin `API_KEY` configurada, o servidor ocupado |
 
 El log de LaTeX NUNCA se devuelve al cliente: puede filtrar rutas absolutas,
 versiones de paquetes y el eco del input. El cliente recibe un `id` de correlacion
 y el log completo queda en el log del servidor.
+
+Si un 422 no lleva `latex_error` es que el log de pdflatex no tenia ninguna linea
+`! ...`: por ejemplo un fallo de permiso, o un proceso que murio antes de escribir
+el log. En ese caso el mensaje generico es todo lo que hay.
 
 CORS: `Access-Control-Allow-Origin` vale `ALLOWED_ORIGIN`, por defecto
 `https://gambito700.github.io`. CORS no es control de acceso: cualquiera puede
@@ -61,7 +65,7 @@ llamar a la API con `curl` sin respetarlo.
 | `RATE_CAPACITY` | `10` | Tokens del cubo de rate limit |
 | `RATE_REFILL_PER_SEC` | `0.2` | Recarga del cubo (0.2/s = 12 por minuto) |
 | `RATE_MAX_ENTRIES` | `4096` | Cubos simultaneos en memoria |
-| `TEXMFCNF` | `/app/texmf` | Directorio con el `texmf.cnf` del sandbox |
+| `LATEX_PASSES` | `2` | Cuantas veces corre pdflatex por peticion |
 
 Generar la clave:
 
