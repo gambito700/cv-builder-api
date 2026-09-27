@@ -24,8 +24,13 @@
 #   geometry, inputenc, fontenc, lmodern, xcolor, tikz, tabularx, enumitem,
 #   hyperref, parskip, tcolorbox, titlesec
 # => cubiertos por latex-base + latex-recommended + latex-extra + pictures +
-#    fonts-recommended. NO quites ninguno: sin tcolorbox no compila la
-#    plantilla creativa, y sin pictures no compila el tikz decorativo.
+#    fonts-recommended + lmodern. NO quites ninguno: sin tcolorbox no compila
+#    la plantilla creativa, sin pictures no compila el tikz decorativo, y sin
+#    lmodern no compila NINGUNA porque las tres piden lmodern.
+#
+# La lista de arriba no es una suposicion: la autocomprobacion del build
+# compila un .tex que carga los 11 paquetes de las tres plantillas. Si falta
+# uno, el build falla en Render y no en produccion.
 
 FROM debian:bookworm-slim
 
@@ -40,8 +45,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     texlive-latex-extra \
     # tikz/pgf: decoracion de las plantillas — ~75 MB
     texlive-pictures \
-    # lmodern + psnfss (las plantillas piden lmodern)
+    # psnfss y las familias base de las plantillas
     texlive-fonts-recommended \
+    # lmodern.sty. OJO: en Debian este archivo NO viene en
+    # texlive-fonts-recommended, que es lo que se creia y por eso
+    # \\usepackage{lmodern} fallaba con "File `lmodern.sty' not found" en las
+    # tres plantillas. Es un paquete propio de Debian.
+    lmodern \
     # babel espanol. OJO: hoy ninguna plantilla lo usa (generator.js no hace
     # \usepackage[spanish]{babel}); se mantiene por si se anade, son 15 MB.
     texlive-lang-spanish \
@@ -90,15 +100,35 @@ COPY app.py .
 # formato no generado, texmf.cnf mal montado, paquete que falta, usuario sin
 # permiso de escritura. Ver tambien SANDBOX_SELFTEST en app.py.
 #
+# El .tex de la comprobacion carga los ONCE paquetes que piden las tres
+# plantillas, no una muestra. La version anterior probaba con 6 y por eso
+# el build paso con lmodern.sty ausente: las tres plantillas lo piden y
+# ninguna compilaba en produccion. La lista sale de js/generator.js, asi que
+# si se anade un \usepackage hay que anadirlo aqui tambien.
+#
 # El bloque de ataques es lo importante: si `openin_any = p` NO esta activo, un
 # atacante podria hacer \input{/proc/self/environ} y sacar la API_KEY y demas
 # variables de entorno dentro de un PDF. Eso rompe el build.
 RUN set -eu; \
     d="$(mktemp -d)"; \
-    printf '%s\n' '\documentclass{article}' '\usepackage{tcolorbox}' \
-        '\usepackage{tikz}' '\usepackage{enumitem}' '\usepackage{tabularx}' \
-        '\usepackage{titlesec}' '\usepackage[spanish]{babel}' \
-        '\begin{document}build-ok\end{document}' > "$d/cv.tex"; \
+    printf '%s\n' '\documentclass[10pt,a4paper]{article}' \
+        '\usepackage[a4paper,top=8mm,bottom=8mm,left=10mm,right=10mm,ignoreheadfoot,nomarginpar]{geometry}' \
+        '\usepackage[utf8]{inputenc}' \
+        '\usepackage[T1]{fontenc}' \
+        '\usepackage{lmodern}' \
+        '\usepackage{xcolor}' \
+        '\usepackage{tikz}' \
+        '\usepackage{tabularx}' \
+        '\usepackage{enumitem}' \
+        '\usepackage{hyperref}' \
+        '\usepackage{parskip}' \
+        '\usepackage{tcolorbox}' \
+        '\usepackage{titlesec}' \
+        '\usepackage[spanish]{babel}' \
+        '\begin{document}' 'build-ok' \
+        '\begin{itemize}\item uno\end{itemize}' \
+        '\begin{tabularx}{\textwidth}{@{} l X}a & b\end{tabularx}' \
+        '\end{document}' > "$d/cv.tex"; \
     cd "$d"; \
     run() { HOME="$d" \
         pdflatex -no-shell-escape -interaction=nonstopmode -halt-on-error \
