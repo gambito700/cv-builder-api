@@ -11,7 +11,7 @@ el token viaja en el JS del navegador) y CORS tampoco lo es (cualquiera puede
 llamar a la API con curl sin respetar CORS). Las defensas reales, en orden de
 importancia, son:
 
-  1. `texmf.cnf` con `openin_any = p` / `openout_any = p` (ver TEXMFCNF): sin
+  1. `texmf.cnf` del sistema con `openin_any = p` / `openout_any = p`: sin
      esto, un `.tex` puede leer `/etc/passwd` con `\\input` o escribir ficheros
      arbitrarios con `\\newwrite` + `\\openout`, incluida la imagen Docker.
   2. `-no-shell-escape`: sin `\\write18` no se lanzan procesos.
@@ -204,13 +204,17 @@ _running = 0
 def _sandbox_env(workdir: str) -> dict[str, str]:
     """Entorno efimero para pdflatex.
 
-    `TEXMFCNF` apunta al directorio con nuestro texmf.cnf. Kpathsea lee TODOS
-    los texmf.cnf de la ruta y "las definiciones de ficheros anteriores
-    pisan a las de ficheros posteriores" (TeX Live Guide, 7.1.2). Como nuestro
-    directorio va primero y solo define `openin_any`/`openout_any`, esos dos
-    valores pisan a los del sistema y TODO lo demas (TEXMFDIST, TEXFORMATS,
-    TEXINPUTS...) sigue viniendo del texmf.cnf del sistema. Por eso el
-    fichero puede tener solo dos lineas.
+    El sandbox de rutas NO se configura desde aqui.Va en el texmf.cnf del
+    sistema: el Dockerfile le anade `openin_any = p` y `openout_any = p` al
+    final, y dentro de un mismo fichero la ultima asignacion gana.
+
+    No se usa TEXMFCNF para eso. Kpathsea lee unicamente los directorios
+    listados en esa variable, asi que apuntarla a un directorio nuestro
+    REEMPLAZA la ruta y deja sin definir TEXMFROOT, TEXMFDIST y TEXFORMATS.
+    Sin TEXMFDIST no se encuentran los formatos precompilados, pdflatex
+    intenta regenerarlos y mktexfmt aborta con "kpsewhich -var-value=
+    TEXMFROOT failed". Es decir: el fichero de dos lineas no se anade al
+    sistema, lo sustituye entero.
 
     `TEXMFHOME` y `TEXMFVAR` apuntan a subdirectorios vacios y efimeros: si no,
     el .tex escribiria en el HOME del proceso.
@@ -221,7 +225,6 @@ def _sandbox_env(workdir: str) -> dict[str, str]:
     os.makedirs(var, exist_ok=True)
 
     env = dict(os.environ)
-    env["TEXMFCNF"] = os.environ.get("TEXMFCNF", "/app/texmf")
     env["TEXMFHOME"] = home
     env["TEXMFVAR"] = var
     env["TEXMFCACHE"] = var

@@ -53,11 +53,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Sandbox de LaTeX ──────────────────────────────────────────────────────────
-# kpathsea busca texmf.cnf en TEXMFCNF y lo pone por delante del del sistema
-# (TeX Live Guide 7.1.2).(openin_any = p / openout_any = p)
+# Sandbox de LaTeX: openin_any / openout_any = paranoid.
+#
+# NO se sustituye TEXMFCNF. kpathsea lee UNICAMENTE los directorios listados en
+# TEXMFCNF: al poner TEXMFCNF=/app/texmf se dejaba de leer el texmf.cnf del
+# sistema y se perdian TEXMFROOT, TEXMFDIST, TEXFORMATS y TEXMFSYSVAR. Sin
+# TEXMFDIST no aparecen los formatos precompilados, pdflatex intenta
+# regenerarlos con mktexfmt y aborta con "kpsewhich -var-value=TEXMFROOT
+# failed", o sea que pdflatex no arranca en la imagen.
+#
+# La forma correcta es AGREGAR las dos directivas al final del texmf.cnf del
+# sistema: dentro de un mismo fichero la ultima asignacion gana, asi que
+# openin_any/openout_any quedan en paranoid y todo lo demas sigue igual.
 WORKDIR /app
 COPY texmf.cnf ./texmf/texmf.cnf
-ENV TEXMFCNF=/app/texmf
+RUN set -eu; \
+    syscnf="/etc/texmf/texmf.cnf"; \
+    if [ ! -f "$syscnf" ]; then \
+      syscnf="$(find /etc /usr/share/texmf /usr/share/texlive -name texmf.cnf -type f 2>/dev/null | head -n 1)"; \
+    fi; \
+    if [ -z "$syscnf" ]; then echo "FALLO: no hay texmf.cnf del sistema"; exit 1; fi; \
+    printf '\n# cv-builder-api: sandbox\nopenin_any = p\nopenout_any = p\n' >> "$syscnf"; \
+    grep -q '^openin_any = p' "$syscnf" \
+      || { echo "FALLO: openin_any no quedo en paranoid"; exit 1; }; \
+    echo "sandbox aplicado sobre $syscnf"
 
 # ── App ───────────────────────────────────────────────────────────────────────
 COPY requirements.txt .
@@ -81,7 +100,7 @@ RUN set -eu; \
         '\usepackage{titlesec}' '\usepackage[spanish]{babel}' \
         '\begin{document}build-ok\end{document}' > "$d/cv.tex"; \
     cd "$d"; \
-    run() { HOME="$d" TEXMFCNF=/app/texmf \
+    run() { HOME="$d" \
         pdflatex -no-shell-escape -interaction=nonstopmode -halt-on-error \
                  -output-directory . "$1" > out.log 2>&1; }; \
     run cv.tex \
