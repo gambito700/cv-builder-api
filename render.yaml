@@ -1,0 +1,39 @@
+# cv-builder-api — Blueprint de Render
+# Sintaxis verificada contra la spec vigente de Render
+# (https://render.com/docs/blueprint-spec, y el JSON Schema
+#  https://render.com/schema/render.yaml.json)
+#
+# `runtime: docker` sustituye a `env: docker`, que Render marco como obsoleto.
+# `autoDeployTrigger` sustituye a `autoDeploy` (tambien obsoleto):
+#   commit      -> despliegue en cada commit a la rama del servicio (default)
+#   checksPass  -> solo si pasan los checks de CI
+#   off         -> sin autodespliegue
+# Se fija `commit` de forma explicita: el default de Render es ese, pero
+# dejarlo escrito hace la intencion legible.
+
+services:
+  - type: web
+    runtime: docker
+    name: cv-builder-api
+    plan: free
+    dockerfilePath: ./Dockerfile
+    # /health no exige token a proposito: lo usan el ping del frontend y el
+    # propio health check de Render.
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    # El apagado por defecto son 30s y una compilacion puede tardar 30s por
+    # pasada: sin esto, Render mataria el worker a mitad de un compile.
+    maxShutdownDelaySeconds: 90
+    envVars:
+      - key: ALLOWED_ORIGIN
+        value: https://gambito700.github.io
+      - key: PORT
+        value: 5000
+
+      # SINCRONIZAR: `sync: false` pide el valor en el dashboard de Render la
+      # primera vez. NO se escribe aqui: el valor viaja despues en el JS del
+      # navegador, asi que no es un secreto, pero si debe ser largo y
+      # aleatorio para que no se pueda adivinar. Generalo con:
+      #   python -c "import secrets; print(secrets.token_urlsafe(32))"
+      - key: API_KEY
+        sync: false

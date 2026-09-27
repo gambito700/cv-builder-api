@@ -1,0 +1,17 @@
+# cv-builder-api — dependencias de Python
+# Versiones verificadas contra PyPI ( existent a 2026-09 ):
+#   flask   3.1.3  publicado 2026-02-19  (requires-python >= 3.9)
+#   gunicorn 26.2.0 publicado 2026-08-24  (requires-python >= 3.10)
+# debian:bookworm-slim trae Python 3.11, compatible con ambas.
+#
+# gunicorn SOLO se instala aqui, no por apt: asi la version la controla pip y no
+# el repositorio de Debian. Si se instala por apt ademas, la ruta de pip puede
+# no ganar y se acaba ejecutando otra version sin avisar.
+#
+# No se pinean las dependencias transitivas (Werkzeug, Jinja2, click, packaging,
+# itsdangerous, MarkupSafe): fijarlas a mano sin probar el conjunto completo
+# suele crear conflictos. Para builds reproducibles byte a byte usa
+# `pip freeze` sobre una imagen que ya funciona.
+
+flask==3.1.3
+gunicorn==26.2.0

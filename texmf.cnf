@@ -1,0 +1,23 @@
+% cv-builder-api — configuracion kpathsea del sandbox
+%
+% Este fichero se monta via la variable TEXMFCNF=/app/texmf (ver Dockerfile y
+% _sandbox_env() en app.py). NO hay que tocar ningun fichero del sistema.
+%
+% Por que funciona con solo estas dos lineas (TeX Live Guide, seccion 7.1.2):
+%   "All texmf.cnf files in the search path will be read and definitions in
+%    earlier files override those in later files."
+% Kpathsea lee TODOS los texmf.cnf de la ruta TEXMFCNF y nuestro directorio va
+% primero, asi que estas dos definiciones pisan a las del sistema, mientras que
+% todo lo demas (TEXMFDIST, TEXFORMATS, TEXINPUTS...) sigue viniendo del
+% texmf.cnf del sistema. Por eso el fichero no necesita copiar el sistema.
+%
+% openin_any / openout_any aceptan:
+%   a = any      (lectura/escritura de cualquier ruta)  <- NO
+%   r = restricted (solo dentro del arbol del sistema)
+%   p = paranoid  (solo dentro del directorio actual)  <- esto
+%
+% Efecto: un \input{/etc/passwd} o un \newwrite+\openout a una ruta absoluta
+% se rechazan con "not allowed" y la compilacion para con -halt-on-error.
+
+openin_any = p
+openout_any = p
