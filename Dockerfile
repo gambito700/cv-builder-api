@@ -130,8 +130,6 @@ RUN useradd --create-home --shell /usr/sbin/nologin --uid 10001 cvb \
 USER cvb
 
 ENV PORT=5000
-EXPOSE 5000
-
 # exec para que gunicorn sea PID 1 y reciba el SIGTERM de Render.
 # ${PORT:-5000}: si Render define PORT, manda Render; si no, 5000.
 # --threads 4 con 1 worker: /health sigue respondiendo aunque haya una
