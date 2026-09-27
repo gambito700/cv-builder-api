@@ -1,116 +1,108 @@
 # cv-builder-api
 
-Compilador LaTeX en PDF para [CV Builder](https://github.com/gambito700/cv-builder-public).
-No la ve el usuario: el frontend estatico genera el `.tex` en el navegador y se lo
-manda a esta API, que lo compila y devuelve el PDF.
+El servidor que compila el LaTeX del
+[CV Builder](https://github.com/gambito700/cv-builder-public). El frontend
+genera el `.tex` en el navegador y se lo manda acá; esta API lo compila con
+`pdflatex` y devuelve el PDF. Es la mitad del backend de ese mismo proyecto
+fullstack.
 
-## Por que vive aparte
+Vive en <https://cv-builder-api-lw51.onrender.com>.
 
-- Se despliega en Render con Docker; GitHub Pages no puede servir contenedores.
-- El frontend cambia seguido, este servicio casi nunca. Separate permite desplegar
-  cada uno cuando toca.
-- Si esta API se cae, el frontend sigue funcionando: el PDF que genera el propio
-  navegador con jsPDF es independiente de este servicio.
+## Por qué vive aparte
 
-## Contrato
+GitHub Pages solo sirve archivos estáticos, no corre contenedores. Además el
+frontend cambia seguido y este servicio casi nunca, y si esta API se cae el
+frontend sigue funcionando: el PDF que dibuja el navegador con jsPDF no depende
+de ella.
 
-### GET /health
+## Los dos endpoints
 
-Despierta el free tier. No pide token a proposito: lo usan el ping del frontend y el
-health check de Render. Devuelve 200 si esta libre, 503 si hay una compilacion en
-curso.
+**`GET /health`** devuelve 200 si está libre y 503 si hay una compilación en
+curso. No pide token a propósito: lo usan el ping del frontend y el health check
+de Render.
 
-### POST /compile
-
-Cabecera `X-API-Key`, cuerpo `application/json`:
+**`POST /compile`** lleva la cabecera `X-API-Key` y un JSON con el `.tex`. El
+campo `template` es opcional y solo se usa en los logs.
 
 ```json
 { "tex": "\\documentclass{article}...", "template": "clasico" }
 ```
 
-`template` es opcional y solo se usa para los logs.
-
-Respuestas:
-
-| Codigo | Cuerpo | Cuando |
+| Código | Responde | Cuándo |
 |---|---|---|
-| 200 | PDF crudo, `Content-Type: application/pdf` | Compilo |
-| 400 | `{error, id}` | Falta `tex`, o no parece un documento LaTeX |
-| 401 | `{error, id}` | `X-API-Key` incorrecto |
-| 413 | `{error}` | El cuerpo supera el tope |
-| 422 | `{error, id, latex_error?}` | La compilacion fallo. `latex_error` aparece solo si el log de pdflatex trae alguna linea `! ...` |
+| 200 | el PDF crudo | Compiló |
+| 400 | `{error, id}` | Falta `tex` o no parece un documento LaTeX |
+| 401 | `{error, id}` | `X-API-Key` incorrecta |
+| 413 | `{error}` | El cuerpo pasa el tope |
+| 422 | `{error, id, latex_error?}` | Compiló mal. `latex_error` aparece solo si el log trae alguna línea `! ...` |
 | 429 | `{error}` | Rate limit |
 | 503 | `{error}` | Sin `API_KEY` configurada, o servidor ocupado |
 
-El log de LaTeX NUNCA se devuelve al cliente: puede filtrar rutas absolutas,
-versiones de paquetes y el eco del input. El cliente recibe un `id` de correlacion
-y el log completo queda en el log del servidor.
+`latex_error` es el motivo real, y es lo que el frontend le muestra a la persona
+para que sepa qué arreglar en vez de un "algo salió mal".
 
-Si un 422 no lleva `latex_error` es que el log de pdflatex no tenia ninguna linea
-`! ...`: por ejemplo un fallo de permiso, o un proceso que murio antes de escribir
-el log. En ese caso el mensaje generico es todo lo que hay.
+El log completo de LaTeX nunca sale del servidor: filtra rutas absolutas,
+versiones de paquetes y el eco del input. El cliente recibe un `id` de correlación
+y el log se queda en el log del servidor.
 
-CORS: `Access-Control-Allow-Origin` vale `ALLOWED_ORIGIN`, por defecto
-`https://gambito700.github.io`. CORS no es control de acceso: cualquiera puede
-llamar a la API con `curl` sin respetarlo.
+## Configuración
 
-## Variables de entorno
-
-| Variable | Por defecto | Para que sirve |
+| Variable | Por defecto | Para qué sirve |
 |---|---|---|
-| `API_KEY` | (sin defecto) | Valor que se compara con `X-API-Key`. Sin esta variable el servicio arranca, pero rechaza todo. |
+| `API_KEY` | (sin defecto) | Se compara con `X-API-Key`. Sin ella el servicio arranca, pero rechaza todo. |
 | `ALLOWED_ORIGIN` | `https://gambito700.github.io` | Origen permitido por CORS |
 | `PORT` | `5000` | Puerto de escucha |
 | `MAX_TEX_BYTES` | `204800` | Tope del `.tex` recibido |
 | `RATE_CAPACITY` | `10` | Tokens del cubo de rate limit |
 | `RATE_REFILL_PER_SEC` | `0.2` | Recarga del cubo (0.2/s = 12 por minuto) |
-| `RATE_MAX_ENTRIES` | `4096` | Cubos simultaneos en memoria |
-| `LATEX_PASSES` | `2` | Cuantas veces corre pdflatex por peticion |
-
-Generar la clave:
+| `RATE_MAX_ENTRIES` | `4096` | Cubos simultáneos en memoria |
+| `LATEX_PASSES` | `2` | Cuántas veces corre `pdflatex` por petición |
+| `LOG_LEVEL` | `INFO` | Nivel de los logs |
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
+Eso genera la clave. Ojo con CORS: vale lo que diga `ALLOWED_ORIGIN`, pero CORS
+no es control de acceso, cualquiera puede llamar a la API con `curl` sin
+respetarlo.
+
 ## Desplegar en Render
 
-1. New > Blueprint, apuntar a este repositorio. Render detecta `render.yaml`.
-2. Render pide el valor de `API_KEY` (`sync: false`): pegar la clave generada.
-3. Deploy. La primera build tarda bastante: instala TeX Live.
-4. Copiar la URL que da Render y ponerla en `js/latex-service.js` del frontend
-   (`CV_API_URL`, y `CV_URL_PENDIENTE` en `false`).
-5. Poner la misma clave en `CV_API_KEY` del frontend.
+1. **New > Blueprint** apuntando a este repo. Render lee el `render.yaml`.
+2. Render pide el valor de `API_KEY` (`sync: false`): pega la clave.
+3. Deploy. La primera build tarda bastante, porque instala TeX Live.
+4. Copia la URL que dio Render a `CV_API_URL` en `js/latex-service.js` del
+   frontend, y pon `CV_URL_PENDIENTE` en `false`. La misma clave va en
+   `CV_API_KEY`.
 
 ## Seguridad
 
-Este servicio es **publico y ejecuta LaTeX que manda cualquiera**. No es un riesgo
-teorico, es la clase de vulnerabilidad mas conocida de los servicios de compilacion
-LaTeX en linea. Las defensas:
+Esta es la parte que más importa acá: es un servicio público que ejecuta el
+LaTeX que mande cualquiera. No es un riesgo teórico, es la vulnerabilidad más
+conocida de los compiladores de LaTeX en línea.
 
-- `texmf.cnf` con `openin_any = p` y `openout_any = p`: sin esto, un `\input{/etc/passwd}`
-  lee ficheros del contenedor y un `\openout` escribe donde el proceso pueda.
+- `texmf.cnf` con `openin_any = p` y `openout_any = p`. Sin esto, un
+  `\input{/etc/passwd}` lee ficheros del contenedor.
 - `-no-shell-escape`: sin `\write18` no se lanzan procesos.
-- `preexec_fn` + `resource`: topes de CPU, tamano de fichero, memoria y
-  `RLIMIT_NPROC = 0`.
-- `TEXMFHOME`/`TEXMFVAR` en directorios efimeros.
-- Token bucket por IP, comprobado **antes** que la clave, para frenar tambien el
+- `preexec_fn` con `resource`: topes de CPU, tamaño, memoria y `RLIMIT_NPROC = 0`.
+- `TEXMFHOME` y `TEXMFVAR` en directorios efímeros.
+- Token bucket por IP, comprobado **antes** que la clave, para frenar también el
   fuerza bruta sobre el token.
-- Tope de tamano de entrada y de concurrencia.
 
-Lo que **no** resuelve: la clave viaja en el JS del frontend, que es publico, asi
-que cualquiera que abra las herramientas de desarrollo la lee. La clave frena el
-abuso casual, no al atacante con tiempo. El limite real es el rate limit, y si el
-servicio llega a molestar, la respuesta correcta es un captcha o Statsig/Fingerprint,
-no alargar la clave.
+Lo que esto **no** arregla: la clave viaja en el JS del frontend, que es
+público, así que cualquiera que abra las herramientas de desarrollo la lee.
+Frena el abuso casual, no al atacante con tiempo. El límite real es el rate
+limit, y si algún día molesta, la respuesta es un captcha, no una clave más
+larga.
 
-## Ficheros
+## Archivos
 
-| Fichero | Que es |
+| Archivo | Qué es |
 |---|---|
-| `app.py` | Flask. Rutas, sandbox, rate limit, compilacion |
-| `texmf.cnf` | Modo paranoido de TeX: `openin_any`/`openout_any` |
-| `Dockerfile` | Debian slim + TeX Live minimo + gunicorn |
+| `app.py` | Flask: rutas, sandbox, rate limit y compilación |
+| `texmf.cnf` | Modo paranoico de TeX: `openin_any` / `openout_any` |
+| `Dockerfile` | Debian slim + TeX Live mínimo + gunicorn |
 | `requirements.txt` | Flask y gunicorn pinneados |
 | `render.yaml` | Blueprint de Render |
-| `generator.js` | Copia de REFERENCIA del generador del frontend, para saber que paquetes LaTeX hacen falta. No lo usa este servicio y no se edita aqui. |
+| `generator.js` | Copia de **referencia** del generador del frontend, para saber qué paquetes LaTeX hacen falta. No lo usa este servicio. |
